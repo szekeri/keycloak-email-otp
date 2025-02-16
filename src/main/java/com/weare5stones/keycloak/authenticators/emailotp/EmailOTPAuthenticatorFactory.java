@@ -13,6 +13,7 @@ import org.keycloak.provider.ProviderConfigProperty;
 public class EmailOTPAuthenticatorFactory implements AuthenticatorFactory {
   public static final String CONFIG_PROP_LENGTH = "length";
   public static final String CONFIG_PROP_TTL = "ttl";
+  public static final String CONFIG_PROP_MAIL_ATTR = "mailAttr";
   public static final String CONFIG_PROP_EMAIL_SUBJECT = "emailSubject";
   public static final String CONFIG_PROP_SIMULATION = "simulation";
   public static final String CONFIG_PROP_ALLOW_UPPERCASE = "allowUppercase";
@@ -72,6 +73,8 @@ public class EmailOTPAuthenticatorFactory implements AuthenticatorFactory {
             ProviderConfigProperty.STRING_TYPE, 6),
         new ProviderConfigProperty(CONFIG_PROP_TTL, "Time-to-live",
             "The time to live in seconds for the code to be valid.", ProviderConfigProperty.STRING_TYPE, "300"),
+      new ProviderConfigProperty(CONFIG_PROP_MAIL_ATTR, "Mail attribute",
+        "The attribute of the user which contains sending email address.", ProviderConfigProperty.STRING_TYPE, "mail"),
         new ProviderConfigProperty(CONFIG_PROP_MAX_RETRIES, "Max Retries",
             "This is the maximum number of retries, after the 1st attempt, before failing.", ProviderConfigProperty.STRING_TYPE,
             2),

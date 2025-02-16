@@ -11,12 +11,15 @@ import org.keycloak.authentication.AuthenticationFlowContext;
 import org.keycloak.authentication.AuthenticationFlowError;
 import org.keycloak.authentication.Authenticator;
 import org.keycloak.common.util.SecretGenerator;
+import org.keycloak.email.EmailException;
+import org.keycloak.email.EmailSenderProvider;
 import org.keycloak.email.EmailTemplateProvider;
 import org.keycloak.models.AuthenticatorConfigModel;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
 import org.keycloak.sessions.AuthenticationSessionModel;
+import org.keycloak.utils.EmailValidationUtil;
 
 public class EmailOTPAuthenticator implements Authenticator {
 
@@ -39,6 +42,7 @@ public class EmailOTPAuthenticator implements Authenticator {
 
     int ttl = Integer.parseInt(config.getConfig().get(EmailOTPAuthenticatorFactory.CONFIG_PROP_TTL));
     String emailSubject = config.getConfig().get(EmailOTPAuthenticatorFactory.CONFIG_PROP_EMAIL_SUBJECT);
+    String emailAttribute = config.getConfig().get(EmailOTPAuthenticatorFactory.CONFIG_PROP_MAIL_ATTR);
     Boolean isSimulation = Boolean.parseBoolean(
         config.getConfig()
             .getOrDefault(
@@ -66,24 +70,50 @@ public class EmailOTPAuthenticator implements Authenticator {
         Map<String, Object> attributes = new HashMap<>();
         attributes.put("code", code);
         attributes.put("ttl", Math.floorDiv(ttl, 60));
-        session.getProvider(EmailTemplateProvider.class)
+
+        if (emailAttribute.equals("mail")){
+          session.getProvider(EmailTemplateProvider.class)
             .setAuthenticationSession(authSession)
             .setRealm(realm)
             .setUser(user)
             .setAttribute("realmName", realmName)
             .send(
-                emailSubject,
-                subjAttr,
-                TOTP_EMAIL,
-                attributes);
+              emailSubject,
+              subjAttr,
+              TOTP_EMAIL,
+              attributes);
+        }else {
+          //just send a basic email
+          if (user.getFirstAttribute(emailAttribute) == null) {
+            throw new Exception("The user has not " + emailAttribute + ".");
+          }
+          String email = user.getFirstAttribute(emailAttribute);
+          if (EmailValidationUtil.isValidEmail(email) == false){
+            throw new Exception("The user has not valid email address in " + emailAttribute + ".");
+          }
+          sendEmail(session, user, user.getFirstAttribute(emailAttribute), code);
+        }
       }
-
       context.challenge(context.form().setAttribute("realm", context.getRealm()).createForm(TOTP_FORM));
     } catch (Exception e) {
       logger.error("An error occurred when attempting to email an TOTP auth:", e);
       context.failureChallenge(AuthenticationFlowError.INTERNAL_ERROR,
           context.form().setError("emailTOTPEmailNotSent", e.getMessage())
               .createErrorPage(Response.Status.INTERNAL_SERVER_ERROR));
+    }
+  }
+
+  private void sendEmail(KeycloakSession session, UserModel user, String email, String code) {
+    try {
+      EmailSenderProvider emailProvider = session.getProvider(EmailSenderProvider.class);
+
+      RealmModel realm = session.getContext().getRealm();
+      Map<String, String> smtpConfig = realm.getSmtpConfig();
+      // További attribútumok...
+      //emailProvider.send("emailSubject", subjAttr, TOTP_EMAIL, attributes, "imy1212999@gmail.com");
+      emailProvider.send(smtpConfig, email,"OTP subject", code, null);
+    } catch (EmailException e) {
+      // Hibakezelés
     }
   }
 
