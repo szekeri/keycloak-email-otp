@@ -94,7 +94,12 @@ public class EmailOTPAuthenticator implements Authenticator {
           sendEmail(session, user, user.getFirstAttribute(emailAttribute), code);
         }
       }
-      context.challenge(context.form().setAttribute("realm", context.getRealm()).createForm(TOTP_FORM));
+      Map<String, Object> formAttributes = new HashMap<>();
+      formAttributes.put("realm", context.getRealm());
+      if (isSimulation){
+        formAttributes.put("code", code);
+      }
+      context.challenge(context.form().setAttribute("attributes", formAttributes).createForm(TOTP_FORM));
     } catch (Exception e) {
       logger.error("An error occurred when attempting to email an TOTP auth:", e);
       context.failureChallenge(AuthenticationFlowError.INTERNAL_ERROR,
@@ -111,7 +116,7 @@ public class EmailOTPAuthenticator implements Authenticator {
       Map<String, String> smtpConfig = realm.getSmtpConfig();
       // További attribútumok...
       //emailProvider.send("emailSubject", subjAttr, TOTP_EMAIL, attributes, "imy1212999@gmail.com");
-      emailProvider.send(smtpConfig, email,"OTP subject", code, null);
+      emailProvider.send(smtpConfig, email,"OTP", code, null);
     } catch (EmailException e) {
       // Hibakezelés
     }
