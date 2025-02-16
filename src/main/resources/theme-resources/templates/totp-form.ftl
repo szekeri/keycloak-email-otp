@@ -1,7 +1,7 @@
 <#import "template.ftl" as layout>
 <@layout.registrationLayout displayInfo=true; section>
 	<#if section = "header">
-		${msg("emailTOTPFormTitle", realm.displayName)}
+		${msg("emailTOTPFormTitle", attributes.realm.displayName)}
 	<#elseif section = "form">
 		<form id="kc-email-totp-code-login-form" class="${properties.kcFormClass!}" action="${url.loginAction}" method="post">
 			<div class="${properties.kcFormGroupClass!}">
@@ -26,5 +26,8 @@
 		</form>
 	<#elseif section = "info" >
 		${msg("emailTOTPFormInstruction")}
+      <#if attributes.code??>
+          ${msg("simulationModeHint", attributes.code)}
+      </#if>
 	</#if>
 </@layout.registrationLayout>
