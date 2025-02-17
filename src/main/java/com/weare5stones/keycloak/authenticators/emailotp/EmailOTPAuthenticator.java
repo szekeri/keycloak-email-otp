@@ -3,9 +3,11 @@ package com.weare5stones.keycloak.authenticators.emailotp;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
 import jakarta.ws.rs.core.Response;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+
+import java.io.IOException;
+import java.text.MessageFormat;
+import java.util.*;
+
 import org.jboss.logging.Logger;
 import org.keycloak.authentication.AuthenticationFlowContext;
 import org.keycloak.authentication.AuthenticationFlowError;
@@ -14,17 +16,21 @@ import org.keycloak.common.util.SecretGenerator;
 import org.keycloak.email.EmailException;
 import org.keycloak.email.EmailSenderProvider;
 import org.keycloak.email.EmailTemplateProvider;
-import org.keycloak.models.AuthenticatorConfigModel;
-import org.keycloak.models.KeycloakSession;
-import org.keycloak.models.RealmModel;
-import org.keycloak.models.UserModel;
+import org.keycloak.email.freemarker.beans.ProfileBean;
+import org.keycloak.forms.login.freemarker.model.UrlBean;
+import org.keycloak.models.*;
 import org.keycloak.sessions.AuthenticationSessionModel;
+import org.keycloak.theme.FreeMarkerException;
+import org.keycloak.theme.Theme;
+import org.keycloak.theme.beans.MessageFormatterMethod;
+import org.keycloak.theme.freemarker.FreeMarkerProvider;
 import org.keycloak.utils.EmailValidationUtil;
 
 public class EmailOTPAuthenticator implements Authenticator {
 
   private static final String TOTP_FORM = "totp-form.ftl";
   private static final String TOTP_EMAIL = "totp-email.ftl";
+  private static final String TOTP_SMS = "totp-sms.ftl";
   private static final String AUTH_NOTE_CODE = "code";
   private static final String AUTH_NOTE_TTL = "ttl";
   private static final String AUTH_NOTE_REMAINING_RETRIES = "remainingRetries";
@@ -33,6 +39,8 @@ public class EmailOTPAuthenticator implements Authenticator {
   private static final String ALPHA_UPPER = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
   private static final String ALPHA_LOWER = "abcdefghijklmnopqrstuvwxyz";
   private static final String NUM = "0123456789";
+
+  protected FreeMarkerProvider freeMarker;
 
   @Override
   public void authenticate(AuthenticationFlowContext context) {
@@ -48,7 +56,11 @@ public class EmailOTPAuthenticator implements Authenticator {
             .getOrDefault(
                 EmailOTPAuthenticatorFactory.CONFIG_PROP_SIMULATION,
                 "false"));
-
+    Boolean SMSTemplate = Boolean.parseBoolean(
+      config.getConfig()
+        .getOrDefault(
+          EmailOTPAuthenticatorFactory.CONFIG_PROP_SMSTEMPLATE,
+          "false"));
     String code = getCode(config);
     int maxRetries = getMaxRetries(config);
     AuthenticationSessionModel authSession = context.getAuthenticationSession();
@@ -71,27 +83,22 @@ public class EmailOTPAuthenticator implements Authenticator {
         attributes.put("code", code);
         attributes.put("ttl", Math.floorDiv(ttl, 60));
 
-        if (emailAttribute.equals("mail")){
-          session.getProvider(EmailTemplateProvider.class)
-            .setAuthenticationSession(authSession)
-            .setRealm(realm)
-            .setUser(user)
-            .setAttribute("realmName", realmName)
-            .send(
-              emailSubject,
-              subjAttr,
-              TOTP_EMAIL,
-              attributes);
+        if (user.getFirstAttribute(emailAttribute) == null) {
+          throw new Exception("The user has not " + emailAttribute + ".");
+        }
+        String email = user.getFirstAttribute(emailAttribute);
+        if (EmailValidationUtil.isValidEmail(email) == false){
+          throw new Exception("The user has not valid email address in " + emailAttribute + ".");
+        }
+        EmailTemplate emailTemplate = null;
+        if (SMSTemplate) {
+          //SMS template-et kell használni, htmlbody-t nem küldünk
+          emailTemplate = processTemplate(emailSubject, subjAttr, TOTP_SMS, attributes, session, user,realm);
+          sendEmail(session, user, email, emailTemplate.getSubject(), emailTemplate.getTextBody(), null);
         }else {
-          //just send a basic email
-          if (user.getFirstAttribute(emailAttribute) == null) {
-            throw new Exception("The user has not " + emailAttribute + ".");
-          }
-          String email = user.getFirstAttribute(emailAttribute);
-          if (EmailValidationUtil.isValidEmail(email) == false){
-            throw new Exception("The user has not valid email address in " + emailAttribute + ".");
-          }
-          sendEmail(session, user, user.getFirstAttribute(emailAttribute), code);
+          //email template használat
+          emailTemplate = processTemplate(emailSubject, subjAttr, TOTP_EMAIL, attributes, session, user,realm);
+          sendEmail(session, user, email, emailTemplate.getSubject(), emailTemplate.getTextBody(), emailTemplate.getHtmlBody());
         }
       }
       Map<String, Object> formAttributes = new HashMap<>();
@@ -108,17 +115,82 @@ public class EmailOTPAuthenticator implements Authenticator {
     }
   }
 
-  private void sendEmail(KeycloakSession session, UserModel user, String email, String code) {
+  private void sendEmail(KeycloakSession session, UserModel user, String email, String subject,  String textBody, String htmlBody) {
     try {
       EmailSenderProvider emailProvider = session.getProvider(EmailSenderProvider.class);
 
       RealmModel realm = session.getContext().getRealm();
       Map<String, String> smtpConfig = realm.getSmtpConfig();
-      // További attribútumok...
-      //emailProvider.send("emailSubject", subjAttr, TOTP_EMAIL, attributes, "imy1212999@gmail.com");
-      emailProvider.send(smtpConfig, email,"OTP", code, null);
+      //
+      emailProvider.send(smtpConfig, email, subject, textBody, htmlBody);
     } catch (EmailException e) {
-      // Hibakezelés
+      logger.error("An error occurred when attempting to email an TOTP auth:", e);
+    }
+  }
+
+  protected Theme getTheme(KeycloakSession session) throws IOException {
+    return session.theme().getTheme(Theme.Type.EMAIL);
+  }
+  protected EmailTemplate processTemplate(String subjectKey, List<Object> subjectAttributes, String template, Map<String, Object> attributes, KeycloakSession session, UserModel user, RealmModel realm) throws EmailException {
+    try {
+      Theme theme = getTheme(session);
+      Locale locale = session.getContext().resolveLocale(user, theme.getType());
+      this.freeMarker = session.getProvider(FreeMarkerProvider.class);
+      attributes.put("locale", locale);
+
+      Properties messages = theme.getEnhancedMessages(realm, locale);
+      attributes.put("msg", new MessageFormatterMethod(locale, messages));
+
+      attributes.put("properties", theme.getProperties());
+      attributes.put("realmName", realm.getDisplayName());
+      attributes.put("user", new ProfileBean(user, session));
+      KeycloakUriInfo uriInfo = session.getContext().getUri();
+      attributes.put("url", new UrlBean(realm, theme, uriInfo.getBaseUri(), null));
+
+      String subject = new MessageFormat(messages.getProperty(subjectKey, subjectKey), locale).format(subjectAttributes.toArray());
+      String textTemplate = String.format("text/%s", template);
+      String textBody;
+      try {
+        textBody = freeMarker.processTemplate(attributes, textTemplate, theme);
+      } catch (final FreeMarkerException e) {
+        throw new EmailException("Failed to template plain text email.", e);
+      }
+      String htmlTemplate = String.format("html/%s", template);
+      String htmlBody;
+      try {
+        htmlBody = freeMarker.processTemplate(attributes, htmlTemplate, theme);
+      } catch (final FreeMarkerException e) {
+        throw new EmailException("Failed to template html email.", e);
+      }
+
+      return new EmailTemplate(subject, textBody, htmlBody);
+    } catch (Exception e) {
+      throw new EmailException("Failed to template email", e);
+    }
+  }
+
+  protected static class EmailTemplate {
+
+    private String subject;
+    private String textBody;
+    private String htmlBody;
+
+    public EmailTemplate(String subject, String textBody, String htmlBody) {
+      this.subject = subject;
+      this.textBody = textBody;
+      this.htmlBody = htmlBody;
+    }
+
+    public String getSubject() {
+      return subject;
+    }
+
+    public String getTextBody() {
+      return textBody;
+    }
+
+    public String getHtmlBody() {
+      return htmlBody;
     }
   }
 
