@@ -16,6 +16,7 @@ public class EmailOTPAuthenticatorFactory implements AuthenticatorFactory {
   public static final String CONFIG_PROP_MAIL_ATTR = "mailAttr";
   public static final String CONFIG_PROP_EMAIL_SUBJECT = "emailSubject";
   public static final String CONFIG_PROP_SIMULATION = "simulation";
+  public static final String CONFIG_PROP_SMSTEMPLATE = "smsTemplate";
   public static final String CONFIG_PROP_ALLOW_UPPERCASE = "allowUppercase";
   public static final String CONFIG_PROP_ALLOW_LOWERCASE = "allowLowercase";
   public static final String CONFIG_PROP_ALLOW_NUMBERS = "allowNumbers";
@@ -69,6 +70,9 @@ public class EmailOTPAuthenticatorFactory implements AuthenticatorFactory {
         new ProviderConfigProperty(CONFIG_PROP_EMAIL_SUBJECT, "Email Subject",
             "The subject of the email that sent to the user.", ProviderConfigProperty.STRING_TYPE,
             "Temporary Authentication Code"),
+      new ProviderConfigProperty(CONFIG_PROP_SMSTEMPLATE, "Use sms template",
+        "Using an sms template, which does not contain html body.",
+        ProviderConfigProperty.BOOLEAN_TYPE, false),
         new ProviderConfigProperty(CONFIG_PROP_LENGTH, "Code length", "The number of digits of the generated code.",
             ProviderConfigProperty.STRING_TYPE, 6),
         new ProviderConfigProperty(CONFIG_PROP_TTL, "Time-to-live",
